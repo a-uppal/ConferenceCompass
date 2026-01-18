@@ -1,63 +1,183 @@
-import { View, StyleSheet, FlatList } from 'react-native';
-import { Text, FAB, Searchbar, Card, Chip } from 'react-native-paper';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { View, StyleSheet, FlatList, RefreshControl } from 'react-native';
+import { Text, FAB, Searchbar, Card, Chip, Avatar, IconButton } from 'react-native-paper';
 import { router } from 'expo-router';
+import { useTeam } from '@/hooks/useTeam';
+import { useContactStore } from '@/stores/contactStore';
+import { Contact } from '@/types/database';
 
 export default function ContactsScreen() {
-  const [searchQuery, setSearchQuery] = useState('');
-  const [contacts, setContacts] = useState<any[]>([]);
+  const { activeConference } = useTeam();
+  const {
+    contacts,
+    isLoading,
+    filters,
+    setFilters,
+    loadContacts,
+    getFilteredContacts,
+  } = useContactStore();
+
+  const [fabOpen, setFabOpen] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+
+  useEffect(() => {
+    if (activeConference) {
+      loadContacts(activeConference.id);
+    }
+  }, [activeConference]);
+
+  const onRefresh = async () => {
+    if (!activeConference) return;
+    setRefreshing(true);
+    await loadContacts(activeConference.id);
+    setRefreshing(false);
+  };
+
+  const filteredContacts = getFilteredContacts();
 
   const handleAddContact = () => {
+    setFabOpen(false);
     router.push('/contact/new');
   };
 
   const handleCapturePhoto = () => {
+    setFabOpen(false);
     router.push('/contact/capture');
   };
+
+  const handleContactPress = (contact: Contact) => {
+    router.push(`/contact/${contact.id}`);
+  };
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'pending':
+        return '#F59E0B';
+      case 'completed':
+        return '#10B981';
+      default:
+        return '#94A3B8';
+    }
+  };
+
+  const renderContact = ({ item }: { item: Contact }) => (
+    <Card style={styles.contactCard} onPress={() => handleContactPress(item)}>
+      <Card.Title
+        title={`${item.first_name} ${item.last_name}`}
+        subtitle={item.company ? `${item.title || ''} at ${item.company}` : item.title}
+        left={(props) => (
+          <Avatar.Text
+            {...props}
+            size={40}
+            label={`${item.first_name.charAt(0)}${item.last_name.charAt(0)}`}
+            style={{ backgroundColor: '#0D9488' }}
+          />
+        )}
+        right={(props) => (
+          <View style={styles.statusIndicator}>
+            {item.follow_up_status !== 'none' && (
+              <Chip
+                compact
+                style={[
+                  styles.statusChip,
+                  { backgroundColor: getStatusColor(item.follow_up_status) },
+                ]}
+                textStyle={styles.statusChipText}
+              >
+                {item.follow_up_status}
+              </Chip>
+            )}
+            {item.linkedin_url && (
+              <IconButton
+                icon="linkedin"
+                size={20}
+                iconColor="#0077B5"
+                onPress={() => {}}
+              />
+            )}
+          </View>
+        )}
+      />
+    </Card>
+  );
 
   return (
     <View style={styles.container}>
       <Searchbar
         placeholder="Search contacts..."
-        onChangeText={setSearchQuery}
-        value={searchQuery}
+        onChangeText={(text) => setFilters({ search: text })}
+        value={filters.search}
         style={styles.searchbar}
       />
 
       <View style={styles.filterRow}>
-        <Chip style={styles.chip} selected>All</Chip>
-        <Chip style={styles.chip}>Pending Follow-up</Chip>
-        <Chip style={styles.chip}>Today</Chip>
+        <Chip
+          style={[
+            styles.chip,
+            filters.followUpStatus === 'all' && styles.chipSelected,
+          ]}
+          selected={filters.followUpStatus === 'all'}
+          onPress={() => setFilters({ followUpStatus: 'all' })}
+        >
+          All ({contacts.length})
+        </Chip>
+        <Chip
+          style={[
+            styles.chip,
+            filters.followUpStatus === 'pending' && styles.chipSelected,
+          ]}
+          selected={filters.followUpStatus === 'pending'}
+          onPress={() => setFilters({ followUpStatus: 'pending' })}
+        >
+          Pending
+        </Chip>
+        <Chip
+          style={[
+            styles.chip,
+            filters.dateRange === 'today' && styles.chipSelected,
+          ]}
+          selected={filters.dateRange === 'today'}
+          onPress={() =>
+            setFilters({
+              dateRange: filters.dateRange === 'today' ? 'all' : 'today',
+            })
+          }
+        >
+          Today
+        </Chip>
       </View>
 
-      {contacts.length === 0 ? (
+      {filteredContacts.length === 0 ? (
         <View style={styles.emptyState}>
           <Text variant="headlineSmall" style={styles.emptyTitle}>
-            No Contacts Yet
+            {contacts.length === 0 ? 'No Contacts Yet' : 'No Matches'}
           </Text>
           <Text variant="bodyMedium" style={styles.emptyText}>
-            Capture your first contact by taking a photo of a badge or adding manually.
+            {contacts.length === 0
+              ? 'Capture your first contact by taking a photo of a badge or adding manually.'
+              : 'Try adjusting your search or filters.'}
           </Text>
         </View>
       ) : (
         <FlatList
-          data={contacts}
+          data={filteredContacts}
           keyExtractor={(item) => item.id}
-          renderItem={({ item }) => (
-            <Card style={styles.contactCard}>
-              <Card.Title
-                title={`${item.first_name} ${item.last_name}`}
-                subtitle={`${item.title || ''} at ${item.company || ''}`}
-              />
-            </Card>
-          )}
+          renderItem={renderContact}
+          contentContainerStyle={styles.list}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor="#0D9488"
+            />
+          }
         />
       )}
 
       <FAB.Group
-        open={false}
+        open={fabOpen}
         visible
-        icon="plus"
+        icon={fabOpen ? 'close' : 'plus'}
         actions={[
           {
             icon: 'camera',
@@ -70,7 +190,7 @@ export default function ContactsScreen() {
             onPress: handleAddContact,
           },
         ]}
-        onStateChange={() => {}}
+        onStateChange={({ open }) => setFabOpen(open)}
         fabStyle={styles.fab}
       />
     </View>
@@ -89,11 +209,32 @@ const styles = StyleSheet.create({
   filterRow: {
     flexDirection: 'row',
     paddingHorizontal: 16,
-    marginBottom: 16,
+    marginBottom: 8,
     gap: 8,
   },
   chip: {
     backgroundColor: '#1E293B',
+  },
+  chipSelected: {
+    backgroundColor: '#0D9488',
+  },
+  list: {
+    padding: 16,
+    paddingTop: 8,
+  },
+  contactCard: {
+    marginBottom: 8,
+  },
+  statusIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  statusChip: {
+    marginRight: 4,
+  },
+  statusChipText: {
+    color: '#fff',
+    fontSize: 10,
   },
   emptyState: {
     flex: 1,
@@ -108,10 +249,6 @@ const styles = StyleSheet.create({
   emptyText: {
     color: '#94A3B8',
     textAlign: 'center',
-  },
-  contactCard: {
-    marginHorizontal: 16,
-    marginBottom: 8,
   },
   fab: {
     backgroundColor: '#0D9488',

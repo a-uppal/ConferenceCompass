@@ -1,10 +1,10 @@
-import { useEffect, useState } from 'react';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { PaperProvider, MD3DarkTheme, MD3LightTheme } from 'react-native-paper';
 import { useColorScheme } from 'react-native';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider } from '@/hooks/useAuth';
+import { TeamProvider } from '@/hooks/useTeam';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -22,17 +22,21 @@ export default function RootLayout() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
-        <PaperProvider theme={theme}>
-          <StatusBar style={colorScheme === 'dark' ? 'light' : 'dark'} />
-          <Stack
-            screenOptions={{
-              headerShown: false,
-            }}
-          >
-            <Stack.Screen name="(auth)" options={{ headerShown: false }} />
-            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-          </Stack>
-        </PaperProvider>
+        <TeamProvider>
+          <PaperProvider theme={theme}>
+            <StatusBar style={colorScheme === 'dark' ? 'light' : 'dark'} />
+            <Stack
+              screenOptions={{
+                headerShown: false,
+              }}
+            >
+              <Stack.Screen name="(auth)" options={{ headerShown: false }} />
+              <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+              <Stack.Screen name="contact" options={{ headerShown: false }} />
+              <Stack.Screen name="session" options={{ headerShown: false }} />
+            </Stack>
+          </PaperProvider>
+        </TeamProvider>
       </AuthProvider>
     </QueryClientProvider>
   );
