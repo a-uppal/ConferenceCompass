@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { supabase } from '@/services/supabase';
 import { Session, SessionAttendance, SessionCapture, TalkingPoint } from '@/types/database';
+import { toLocalDateString } from '@/utils/dateUtils';
 
 interface SessionFilters {
   search: string;
@@ -225,11 +226,11 @@ export const useSessionStore = create<SessionState>()((set, get) => ({
 
   getSessionsByDate: (date: Date) => {
     const { sessions, filters } = get();
-    const dateStr = date.toISOString().split('T')[0];
+    const dateStr = toLocalDateString(date);
 
     return sessions.filter((session) => {
-      // Date filter
-      const sessionDate = new Date(session.start_time).toISOString().split('T')[0];
+      // Date filter - use local timezone comparison
+      const sessionDate = toLocalDateString(new Date(session.start_time));
       if (sessionDate !== dateStr) return false;
 
       // Search filter
@@ -247,8 +248,10 @@ export const useSessionStore = create<SessionState>()((set, get) => ({
 
       // Attendance status filter
       if (filters.attendanceStatus !== 'all') {
-        const attendanceStatus = session.attendance?.status || 'none';
-        if (attendanceStatus !== filters.attendanceStatus) return false;
+        const sessionAttendanceStatus = session.attendance?.status;
+        // Sessions without attendance don't match any specific filter
+        if (!sessionAttendanceStatus) return false;
+        if (sessionAttendanceStatus !== filters.attendanceStatus) return false;
       }
 
       return true;

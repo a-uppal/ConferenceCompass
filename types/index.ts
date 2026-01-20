@@ -1,5 +1,6 @@
 // Re-export all types
 export * from './database';
+export * from './campaign';
 
 // App-specific types
 export interface AppState {

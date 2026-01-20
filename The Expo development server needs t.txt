@@ -1,0 +1,10 @@
+The Expo development server needs to be run in a terminal that supports its interactive UI. Since this is a shell environment, let me provide you the command to run manually:
+
+  cd /c/Users/anuj_/OneDrive/Documents/ConferenceCompass
+  npm start
+
+  Or on Windows PowerShell:
+  cd C:\Users\anuj_\OneDrive\Documents\ConferenceCompass
+  npm start
+
+  This will show you a QR code to scan with Expo Go on your phone.

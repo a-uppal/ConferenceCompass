@@ -1,11 +1,12 @@
-import { useEffect, useState } from 'react';
-import { View, StyleSheet, FlatList, ScrollView, RefreshControl } from 'react-native';
+import { useEffect, useState, useMemo } from 'react';
+import { View, StyleSheet, FlatList, ScrollView, RefreshControl, Pressable } from 'react-native';
 import { Text, Card, Chip, SegmentedButtons, Surface, IconButton } from 'react-native-paper';
 import { router } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useTeam } from '@/hooks/useTeam';
 import { useSessionStore } from '@/stores/sessionStore';
 import { Session } from '@/types/database';
+import { toLocalDateString, isSessionLive, parseLocalDate } from '@/utils/dateUtils';
 
 export default function SessionsScreen() {
   const { activeConference } = useTeam();
@@ -27,6 +28,10 @@ export default function SessionsScreen() {
   useEffect(() => {
     if (activeConference) {
       loadSessions(activeConference.id);
+      // Set initial date to conference start date (local timezone)
+      if (activeConference.start_date) {
+        setSelectedDate(parseLocalDate(activeConference.start_date));
+      }
     }
   }, [activeConference]);
 
@@ -40,10 +45,12 @@ export default function SessionsScreen() {
   const filteredSessions = getSessionsByDate(selectedDate);
   const tracks = getTracks();
 
-  // Get unique dates from sessions for calendar
-  const sessionDates = [...new Set(
-    sessions.map((s) => new Date(s.start_time).toISOString().split('T')[0])
-  )].sort();
+  // Get unique dates from sessions for calendar (memoized, local timezone)
+  const sessionDates = useMemo(() => {
+    return [...new Set(
+      sessions.map((s) => toLocalDateString(new Date(s.start_time)))
+    )].sort();
+  }, [sessions]);
 
   const handleSessionPress = (session: Session) => {
     router.push(`/session/${session.id}`);
@@ -73,7 +80,7 @@ export default function SessionsScreen() {
 
   const renderSession = ({ item }: { item: Session & { attendance?: any; talking_points?: any[] } }) => {
     const attendanceInfo = getAttendanceIcon(item.attendance?.status);
-    const isNow = new Date() >= new Date(item.start_time) && new Date() <= new Date(item.end_time);
+    const isNow = isSessionLive(item.start_time, item.end_time);
     const hasTalkingPoints = item.talking_points && item.talking_points.length > 0;
 
     return (
@@ -146,28 +153,29 @@ export default function SessionsScreen() {
       contentContainerStyle={styles.dateSelector}
     >
       {sessionDates.map((dateStr) => {
-        const date = new Date(dateStr);
-        const isSelected = selectedDate.toISOString().split('T')[0] === dateStr;
-        const dayName = date.toLocaleDateString('en-US', { weekday: 'short' });
+        const date = parseLocalDate(dateStr);
+        const isSelected = toLocalDateString(selectedDate) === dateStr;
+        const dayName = date.toLocaleDateString(undefined, { weekday: 'short' });
         const dayNum = date.getDate();
-        const monthName = date.toLocaleDateString('en-US', { month: 'short' });
+        const monthName = date.toLocaleDateString(undefined, { month: 'short' });
 
         return (
-          <Surface
+          <Pressable
             key={dateStr}
-            style={[styles.dateCard, isSelected && styles.dateCardSelected]}
-            onTouchEnd={() => setSelectedDate(date)}
+            onPress={() => setSelectedDate(date)}
           >
-            <Text style={[styles.dayName, isSelected && styles.dateTextSelected]}>
-              {dayName}
-            </Text>
-            <Text style={[styles.dayNum, isSelected && styles.dateTextSelected]}>
-              {dayNum}
-            </Text>
-            <Text style={[styles.monthName, isSelected && styles.dateTextSelected]}>
-              {monthName}
-            </Text>
-          </Surface>
+            <Surface style={[styles.dateCard, isSelected && styles.dateCardSelected]}>
+              <Text style={[styles.dayName, isSelected && styles.dateTextSelected]}>
+                {dayName}
+              </Text>
+              <Text style={[styles.dayNum, isSelected && styles.dateTextSelected]}>
+                {dayNum}
+              </Text>
+              <Text style={[styles.monthName, isSelected && styles.dateTextSelected]}>
+                {monthName}
+              </Text>
+            </Surface>
+          </Pressable>
         );
       })}
     </ScrollView>

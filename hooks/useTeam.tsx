@@ -15,6 +15,8 @@ interface TeamContextType {
   createTeam: (name: string, description?: string) => Promise<Team>;
   joinTeam: (teamId: string) => Promise<void>;
   createConference: (data: Omit<Conference, 'id' | 'created_at' | 'updated_at'>) => Promise<Conference>;
+  updateConference: (id: string, data: Partial<Conference>) => Promise<Conference>;
+  deleteConference: (id: string) => Promise<void>;
   refreshTeams: () => Promise<void>;
   refreshConferences: () => Promise<void>;
 }
@@ -87,8 +89,11 @@ export function TeamProvider({ children }: TeamProviderProps) {
       } else {
         setTeams([]);
       }
-    } catch (error) {
-      console.error('Error loading teams:', error);
+    } catch (error: any) {
+      // Ignore AbortError - it's expected during navigation
+      if (error?.name !== 'AbortError' && !error?.message?.includes('AbortError')) {
+        console.error('Error loading teams:', error);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -204,6 +209,51 @@ export function TeamProvider({ children }: TeamProviderProps) {
     return conference;
   };
 
+  const updateConference = async (
+    id: string,
+    data: Partial<Conference>
+  ): Promise<Conference> => {
+    const { data: conference, error } = await supabase
+      .from('conferences')
+      .update(data)
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    // Refresh conferences list
+    if (activeTeam) {
+      await loadTeamConferences(activeTeam.id);
+    }
+
+    // Update active conference if it was the one edited
+    if (activeConference?.id === id) {
+      setActiveConference(conference);
+    }
+
+    return conference;
+  };
+
+  const deleteConference = async (id: string): Promise<void> => {
+    const { error } = await supabase
+      .from('conferences')
+      .delete()
+      .eq('id', id);
+
+    if (error) throw error;
+
+    // Refresh conferences list
+    if (activeTeam) {
+      await loadTeamConferences(activeTeam.id);
+    }
+
+    // Clear active conference if it was deleted
+    if (activeConference?.id === id) {
+      setActiveConference(null);
+    }
+  };
+
   const refreshTeams = async () => {
     await loadUserTeams();
   };
@@ -226,6 +276,8 @@ export function TeamProvider({ children }: TeamProviderProps) {
     createTeam,
     joinTeam,
     createConference,
+    updateConference,
+    deleteConference,
     refreshTeams,
     refreshConferences,
   };

@@ -135,6 +135,28 @@ export default function ContactDetailScreen() {
             />
           )}
         </View>
+
+        {/* AI Follow-Up Button */}
+        {contact.follow_up_status !== 'completed' ? (
+          <Button
+            mode="contained"
+            icon="message-reply-text"
+            onPress={() => router.push(`/contact/follow-up?contactId=${contact.id}`)}
+            style={styles.followUpButton}
+            contentStyle={styles.followUpButtonContent}
+          >
+            AI Follow-Up Message
+          </Button>
+        ) : (
+          <View style={styles.followUpSentBadge}>
+            <MaterialCommunityIcons name="check-circle" size={18} color="#10B981" />
+            <Text style={styles.followUpSentText}>
+              Follow-up sent {contact.follow_up_sent_at
+                ? new Date(contact.follow_up_sent_at).toLocaleDateString()
+                : ''}
+            </Text>
+          </View>
+        )}
       </Surface>
 
       <Surface style={styles.section}>
@@ -304,6 +326,27 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     marginTop: 16,
     gap: 12,
+  },
+  followUpButton: {
+    marginTop: 16,
+    backgroundColor: '#0D9488',
+  },
+  followUpButtonContent: {
+    paddingVertical: 6,
+  },
+  followUpSentBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 16,
+    gap: 8,
+    backgroundColor: '#10B98120',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 8,
+  },
+  followUpSentText: {
+    color: '#10B981',
+    fontWeight: '500',
   },
   section: {
     marginHorizontal: 16,

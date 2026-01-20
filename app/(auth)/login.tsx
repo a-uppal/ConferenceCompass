@@ -1,20 +1,27 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { View, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native';
 import { Text, TextInput, Button, Surface } from 'react-native-paper';
 import { Link, router } from 'expo-router';
 import { useAuth } from '@/hooks/useAuth';
 
 export default function LoginScreen() {
-  const { signIn, signInWithGoogle, signInWithLinkedIn, isLoading } = useAuth();
+  const { signIn, signInWithGoogle, signInWithLinkedIn, isLoading, isAuthenticated } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+
+  // Navigate when authentication succeeds
+  useEffect(() => {
+    if (isAuthenticated) {
+      router.replace('/(tabs)');
+    }
+  }, [isAuthenticated]);
 
   const handleLogin = async () => {
     try {
       setError('');
       await signIn(email, password);
-      router.replace('/(tabs)');
+      // Don't navigate here - useEffect will handle it when isAuthenticated becomes true
     } catch (err: any) {
       setError(err.message || 'Failed to sign in');
     }

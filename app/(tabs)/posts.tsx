@@ -1,368 +1,304 @@
-import { useEffect, useState } from 'react';
-import { View, StyleSheet, SectionList, ScrollView, RefreshControl, Linking, Alert } from 'react-native';
-import { Text, Card, Chip, Button, Avatar, Surface, IconButton, SegmentedButtons, Badge } from 'react-native-paper';
+import React, { useState, useCallback } from 'react';
+import { View, StyleSheet, FlatList, RefreshControl, Alert } from 'react-native';
+import { Text, SegmentedButtons, FAB, Chip, Searchbar } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { router } from 'expo-router';
 import { useTeam } from '@/hooks/useTeam';
 import { useAuth } from '@/hooks/useAuth';
-import { usePostStore } from '@/stores/postStore';
-import { Post, PostEngagement } from '@/types/database';
+import { useCampaign } from '@/hooks/useCampaign';
+import { useSocialPosts } from '@/hooks/useSocialPosts';
+import { useCrossPollination } from '@/hooks/useCrossPollination';
+import { ConferenceSelector } from '@/components/ConferenceSelector';
+import {
+  PostCard,
+  PostCalendarView,
+  PostDetailModal,
+} from '@/components/campaign';
+import { CampaignPost, PostStatus } from '@/types/campaign';
 
-interface PostWithEngagements extends Post {
-  engagements?: PostEngagement[];
-  author?: {
-    id: string;
-    full_name: string;
-    avatar_url?: string;
-  };
-}
+type ViewMode = 'list' | 'calendar';
+type FilterStatus = 'all' | 'draft' | 'scheduled' | 'posted';
 
 export default function PostsScreen() {
-  const { activeConference, teamMembers } = useTeam();
+  const { activeConference, isLoading: teamLoading } = useTeam();
   const { user } = useAuth();
+  const { phases, getCurrentWeek } = useCampaign();
   const {
     posts,
-    isLoading,
-    filters,
-    selectedWeek,
-    setFilters,
-    setSelectedWeek,
-    loadPosts,
-    updatePostStatus,
-    addEngagement,
-    removeEngagement,
-    getPostsByWeek,
-  } = usePostStore();
+    isLoading: postsLoading,
+    refreshPosts,
+    updatePost,
+    deletePost,
+    markAsPosted,
+  } = useSocialPosts();
+  const { tasks: crossPollinationTasks } = useCrossPollination();
 
-  const [viewMode, setViewMode] = useState<'week' | 'calendar'>('week');
+  const [viewMode, setViewMode] = useState<ViewMode>('list');
+  const [filterStatus, setFilterStatus] = useState<FilterStatus>('all');
+  const [searchQuery, setSearchQuery] = useState('');
   const [refreshing, setRefreshing] = useState(false);
+  const [selectedPost, setSelectedPost] = useState<CampaignPost | null>(null);
+  const [detailModalVisible, setDetailModalVisible] = useState(false);
 
-  useEffect(() => {
-    if (activeConference) {
-      loadPosts(activeConference.id);
+  const currentWeek = getCurrentWeek();
+
+  // Filter posts
+  const filteredPosts = posts.filter((post) => {
+    // Status filter
+    if (filterStatus !== 'all') {
+      if (filterStatus === 'posted' && post.status !== 'posted' && post.status !== 'published') {
+        return false;
+      }
+      if (filterStatus !== 'posted' && post.status !== filterStatus) {
+        return false;
+      }
     }
-  }, [activeConference]);
 
-  const onRefresh = async () => {
-    if (!activeConference) return;
+    // Search filter
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase();
+      const matchesContent = post.content?.toLowerCase().includes(query);
+      const matchesTheme = post.theme?.toLowerCase().includes(query);
+      const matchesAuthor = post.author?.full_name?.toLowerCase().includes(query);
+      if (!matchesContent && !matchesTheme && !matchesAuthor) {
+        return false;
+      }
+    }
+
+    return true;
+  });
+
+  const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await loadPosts(activeConference.id);
+    await refreshPosts();
     setRefreshing(false);
+  }, [refreshPosts]);
+
+  const handlePostPress = (post: CampaignPost) => {
+    setSelectedPost(post);
+    setDetailModalVisible(true);
   };
 
-  // Get unique weeks from posts
-  const weeks = [...new Set(posts.map((p) => p.week_number || 0))].sort((a, b) => a - b);
-
-  // Group posts by date for the selected week
-  const weekPosts = getPostsByWeek(selectedWeek);
-  const postsByDate = weekPosts.reduce((acc, post) => {
-    const date = post.scheduled_date;
-    if (!acc[date]) acc[date] = [];
-    acc[date].push(post);
-    return acc;
-  }, {} as Record<string, PostWithEngagements[]>);
-
-  const sections = Object.entries(postsByDate)
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([date, datePosts]) => ({
-      title: formatSectionDate(date),
-      data: datePosts,
-    }));
-
-  function formatSectionDate(dateStr: string): string {
-    const date = new Date(dateStr);
-    return date.toLocaleDateString('en-US', {
-      weekday: 'long',
-      month: 'short',
-      day: 'numeric',
-    });
-  }
-
-  function getWeekLabel(weekNum: number): string {
-    if (weekNum < 0) return `Week ${weekNum} (Pre-event)`;
-    if (weekNum === 0) return 'Conference Week';
-    return `Week +${weekNum} (Follow-up)`;
-  }
-
-  const openLinkedIn = (url?: string) => {
-    if (url) {
-      Linking.openURL(url);
-    } else {
-      Alert.alert('No Link', 'This post doesn\'t have a LinkedIn URL yet.');
-    }
+  const handleEditPost = (post: CampaignPost) => {
+    setDetailModalVisible(false);
+    router.push(`/post/${post.id}`);
   };
 
-  const handleMarkPublished = async (post: PostWithEngagements) => {
+  const handleMarkPosted = async (post: CampaignPost) => {
     Alert.prompt(
-      'Post Published',
-      'Enter the LinkedIn post URL:',
+      'Mark as Posted',
+      'Enter the LinkedIn post URL (optional):',
       async (url) => {
-        if (url) {
-          try {
-            await updatePostStatus(post.id, 'published', url);
-            Alert.alert('Success', 'Post marked as published!');
-          } catch (err) {
-            Alert.alert('Error', 'Failed to update post status');
-          }
+        try {
+          await markAsPosted(post.id, url || undefined);
+          setDetailModalVisible(false);
+          Alert.alert('Success', 'Post marked as posted!');
+        } catch (err) {
+          Alert.alert('Error', 'Failed to update post status');
         }
       },
-      'plain-text'
+      'plain-text',
+      '',
+      'url'
     );
   };
 
-  const handleEngagement = async (post: PostWithEngagements, type: PostEngagement['engagement_type']) => {
-    if (!user) return;
-
-    const hasEngaged = post.engagements?.some(
-      (e) => e.user_id === user.id && e.engagement_type === type
+  const handleSkipPost = async (post: CampaignPost) => {
+    Alert.alert(
+      'Skip Post',
+      'Are you sure you want to skip this post?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Skip',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await updatePost(post.id, { status: 'skipped' });
+              setDetailModalVisible(false);
+            } catch (err) {
+              Alert.alert('Error', 'Failed to skip post');
+            }
+          },
+        },
+      ]
     );
+  };
 
-    try {
-      if (hasEngaged) {
-        await removeEngagement(post.id, user.id, type);
-      } else {
-        await addEngagement(post.id, user.id, type);
-        // Open LinkedIn after marking engagement
-        if (post.linkedin_url) {
-          openLinkedIn(post.linkedin_url);
-        }
+  const handleDeletePost = async (post: CampaignPost) => {
+    Alert.alert(
+      'Delete Post',
+      'Are you sure you want to delete this post? This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deletePost(post.id);
+              setDetailModalVisible(false);
+            } catch (err) {
+              Alert.alert('Error', 'Failed to delete post');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleAddPostFromCalendar = (date: string, dayOfWeek: string) => {
+    router.push({
+      pathname: '/post/new',
+      params: { date, dayOfWeek },
+    });
+  };
+
+  // Get cross-pollination tasks for selected post
+  const selectedPostTasks = selectedPost
+    ? crossPollinationTasks.filter((t) => t.post_id === selectedPost.id)
+    : [];
+
+  // Show conference selector if no conference is active
+  if (!activeConference && !teamLoading) {
+    return <ConferenceSelector />;
+  }
+
+  const renderListView = () => (
+    <FlatList
+      data={filteredPosts}
+      keyExtractor={(item) => item.id}
+      renderItem={({ item }) => (
+        <PostCard
+          post={item}
+          onPress={() => handlePostPress(item)}
+          onEdit={() => handleEditPost(item)}
+          onDelete={() => handleDeletePost(item)}
+          onMarkPosted={() => handleMarkPosted(item)}
+          onSkip={() => handleSkipPost(item)}
+          showActions={item.author_id === user?.id}
+        />
+      )}
+      contentContainerStyle={styles.listContent}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={onRefresh}
+          tintColor="#0D9488"
+          colors={['#0D9488']}
+        />
       }
-    } catch (err) {
-      Alert.alert('Error', 'Failed to update engagement');
-    }
-  };
-
-  const getEngagementCount = (post: PostWithEngagements): number => {
-    return post.engagements?.length || 0;
-  };
-
-  const hasUserEngaged = (post: PostWithEngagements): boolean => {
-    return post.engagements?.some((e) => e.user_id === user?.id) || false;
-  };
-
-  const getStatusColor = (status: Post['status']): string => {
-    switch (status) {
-      case 'published':
-        return '#10B981';
-      case 'skipped':
-        return '#94A3B8';
-      default:
-        return '#3B82F6';
-    }
-  };
-
-  const renderWeekSelector = () => (
-    <ScrollView
-      horizontal
-      showsHorizontalScrollIndicator={false}
-      contentContainerStyle={styles.weekSelector}
-    >
-      {weeks.map((week) => {
-        const isSelected = selectedWeek === week;
-        const weekPostCount = getPostsByWeek(week).length;
-
-        return (
-          <Surface
-            key={week}
-            style={[styles.weekCard, isSelected && styles.weekCardSelected]}
-            onTouchEnd={() => setSelectedWeek(week)}
-          >
-            <Text style={[styles.weekNum, isSelected && styles.weekTextSelected]}>
-              {week === 0 ? 'CONF' : week > 0 ? `+${week}` : week}
-            </Text>
-            <Text style={[styles.weekLabel, isSelected && styles.weekTextSelected]}>
-              {weekPostCount} posts
-            </Text>
-          </Surface>
-        );
-      })}
-    </ScrollView>
+      ListEmptyComponent={
+        <View style={styles.emptyState}>
+          <MaterialCommunityIcons name="post-outline" size={64} color="#64748B" />
+          <Text style={styles.emptyTitle}>No Posts Found</Text>
+          <Text style={styles.emptyText}>
+            {filterStatus !== 'all' || searchQuery
+              ? 'Try adjusting your filters or search query'
+              : 'Tap + to create your first post'}
+          </Text>
+        </View>
+      }
+    />
   );
 
-  const renderPost = ({ item }: { item: PostWithEngagements }) => {
-    const isMyPost = item.author_id === user?.id;
-    const engagementCount = getEngagementCount(item);
-    const userEngaged = hasUserEngaged(item);
-    const authorInitial = item.author?.full_name?.charAt(0) || 'U';
-
-    return (
-      <Card style={styles.postCard}>
-        <Card.Title
-          title={item.author?.full_name || 'Team Member'}
-          subtitle={item.scheduled_time ? `Scheduled: ${item.scheduled_time}` : 'Time TBD'}
-          left={(props) => (
-            <Avatar.Text
-              {...props}
-              label={authorInitial}
-              style={{ backgroundColor: isMyPost ? '#0D9488' : '#3B82F6' }}
-            />
-          )}
-          right={() => (
-            <View style={styles.statusContainer}>
-              <Chip
-                compact
-                style={[styles.statusChip, { backgroundColor: getStatusColor(item.status) }]}
-                textStyle={styles.statusChipText}
-              >
-                {item.status.charAt(0).toUpperCase() + item.status.slice(1)}
-              </Chip>
-            </View>
-          )}
-        />
-        <Card.Content>
-          <Text variant="bodyMedium" style={styles.contentPreview} numberOfLines={4}>
-            {item.content_preview || 'No preview available'}
-          </Text>
-
-          <View style={styles.postMeta}>
-            {item.post_type && (
-              <Chip compact style={styles.typeChip}>
-                {item.post_type}
-              </Chip>
-            )}
-            <Chip compact style={styles.platformChip} icon="linkedin">
-              {item.platform}
-            </Chip>
-          </View>
-
-          {/* Team Engagement Indicator */}
-          {engagementCount > 0 && (
-            <View style={styles.engagementRow}>
-              <MaterialCommunityIcons name="account-group" size={16} color="#10B981" />
-              <Text style={styles.engagementText}>
-                {engagementCount} team member{engagementCount > 1 ? 's' : ''} engaged
-              </Text>
-            </View>
-          )}
-        </Card.Content>
-
-        <Card.Actions style={styles.cardActions}>
-          {item.status === 'published' ? (
-            <>
-              <Button
-                mode={userEngaged ? 'contained' : 'outlined'}
-                compact
-                onPress={() => handleEngagement(item, 'like')}
-                icon={userEngaged ? 'check' : 'thumb-up'}
-                style={userEngaged ? styles.engagedButton : undefined}
-              >
-                {userEngaged ? 'Engaged' : 'Engage'}
-              </Button>
-              <Button
-                mode="text"
-                compact
-                onPress={() => openLinkedIn(item.linkedin_url)}
-                icon="open-in-new"
-              >
-                View Post
-              </Button>
-            </>
-          ) : isMyPost ? (
-            <>
-              <Button
-                mode="contained"
-                compact
-                onPress={() => handleMarkPublished(item)}
-                style={styles.publishButton}
-              >
-                Mark Published
-              </Button>
-              <Button
-                mode="text"
-                compact
-                onPress={() => updatePostStatus(item.id, 'skipped')}
-              >
-                Skip
-              </Button>
-            </>
-          ) : (
-            <Text style={styles.scheduledHint}>
-              📅 Scheduled for {item.author?.full_name?.split(' ')[0]}
-            </Text>
-          )}
-        </Card.Actions>
-      </Card>
-    );
-  };
+  const renderCalendarView = () => (
+    <PostCalendarView
+      posts={posts}
+      phases={phases}
+      currentWeek={currentWeek}
+      onPostPress={handlePostPress}
+      onAddPost={handleAddPostFromCalendar}
+    />
+  );
 
   return (
     <View style={styles.container}>
+      {/* View Mode Toggle */}
       <View style={styles.controls}>
         <SegmentedButtons
           value={viewMode}
-          onValueChange={(v) => setViewMode(v as 'week' | 'calendar')}
+          onValueChange={(v) => setViewMode(v as ViewMode)}
           buttons={[
-            { value: 'week', label: 'By Week', icon: 'view-week' },
-            { value: 'calendar', label: 'Calendar', icon: 'calendar' },
+            { value: 'list', label: 'List', icon: 'view-list' },
+            { value: 'calendar', label: 'Calendar', icon: 'calendar-month' },
           ]}
           style={styles.segmented}
         />
       </View>
 
-      {/* Week Selector */}
-      {weeks.length > 0 && renderWeekSelector()}
+      {/* Search & Filters (List View Only) */}
+      {viewMode === 'list' && (
+        <>
+          <Searchbar
+            placeholder="Search posts..."
+            onChangeText={setSearchQuery}
+            value={searchQuery}
+            style={styles.searchbar}
+            inputStyle={styles.searchInput}
+            iconColor="#94A3B8"
+            placeholderTextColor="#64748B"
+          />
 
-      {/* Filter Row */}
-      <View style={styles.filterRow}>
-        <Chip
-          style={[styles.chip, filters.status === 'all' && styles.chipSelected]}
-          selected={filters.status === 'all'}
-          onPress={() => setFilters({ status: 'all' })}
-        >
-          All
-        </Chip>
-        <Chip
-          style={[styles.chip, filters.status === 'scheduled' && styles.chipSelected]}
-          selected={filters.status === 'scheduled'}
-          onPress={() => setFilters({ status: 'scheduled' })}
-        >
-          Scheduled
-        </Chip>
-        <Chip
-          style={[styles.chip, filters.status === 'published' && styles.chipSelected]}
-          selected={filters.status === 'published'}
-          onPress={() => setFilters({ status: 'published' })}
-        >
-          Published
-        </Chip>
-      </View>
-
-      {posts.length === 0 ? (
-        <View style={styles.emptyState}>
-          <MaterialCommunityIcons name="linkedin" size={64} color="#94A3B8" />
-          <Text variant="headlineSmall" style={styles.emptyTitle}>
-            No Posts Scheduled
-          </Text>
-          <Text variant="bodyMedium" style={styles.emptyText}>
-            Import your LOTF Strategy Excel to populate the post calendar with scheduled LinkedIn content.
-          </Text>
-        </View>
-      ) : sections.length === 0 ? (
-        <View style={styles.emptyState}>
-          <Text variant="titleMedium" style={styles.emptyTitle}>
-            No Posts This Week
-          </Text>
-          <Text variant="bodyMedium" style={styles.emptyText}>
-            Select a different week or adjust filters.
-          </Text>
-        </View>
-      ) : (
-        <SectionList
-          sections={sections}
-          keyExtractor={(item) => item.id}
-          renderItem={renderPost}
-          renderSectionHeader={({ section: { title } }) => (
-            <Text style={styles.sectionHeader}>{title}</Text>
-          )}
-          contentContainerStyle={styles.list}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={onRefresh}
-              tintColor="#0D9488"
-            />
-          }
-        />
+          <View style={styles.filterRow}>
+            <Chip
+              style={[styles.filterChip, filterStatus === 'all' && styles.filterChipSelected]}
+              selected={filterStatus === 'all'}
+              onPress={() => setFilterStatus('all')}
+              showSelectedOverlay={false}
+            >
+              All ({posts.length})
+            </Chip>
+            <Chip
+              style={[styles.filterChip, filterStatus === 'draft' && styles.filterChipSelected]}
+              selected={filterStatus === 'draft'}
+              onPress={() => setFilterStatus('draft')}
+              showSelectedOverlay={false}
+            >
+              Drafts
+            </Chip>
+            <Chip
+              style={[styles.filterChip, filterStatus === 'scheduled' && styles.filterChipSelected]}
+              selected={filterStatus === 'scheduled'}
+              onPress={() => setFilterStatus('scheduled')}
+              showSelectedOverlay={false}
+            >
+              Scheduled
+            </Chip>
+            <Chip
+              style={[styles.filterChip, filterStatus === 'posted' && styles.filterChipSelected]}
+              selected={filterStatus === 'posted'}
+              onPress={() => setFilterStatus('posted')}
+              showSelectedOverlay={false}
+            >
+              Posted
+            </Chip>
+          </View>
+        </>
       )}
+
+      {/* Content */}
+      {viewMode === 'list' ? renderListView() : renderCalendarView()}
+
+      {/* FAB */}
+      <FAB
+        icon="plus"
+        style={styles.fab}
+        onPress={() => router.push('/post/new')}
+        color="#fff"
+      />
+
+      {/* Post Detail Modal */}
+      <PostDetailModal
+        visible={detailModalVisible}
+        post={selectedPost}
+        crossPollinationTasks={selectedPostTasks}
+        onClose={() => setDetailModalVisible(false)}
+        onEdit={() => selectedPost && handleEditPost(selectedPost)}
+        onMarkPosted={() => selectedPost && handleMarkPosted(selectedPost)}
+        onSkip={() => selectedPost && handleSkipPost(selectedPost)}
+        onDelete={() => selectedPost && handleDeletePost(selectedPost)}
+      />
     </View>
   );
 }
@@ -379,127 +315,54 @@ const styles = StyleSheet.create({
   segmented: {
     backgroundColor: '#1E293B',
   },
-  weekSelector: {
-    paddingHorizontal: 16,
-    paddingBottom: 12,
-    gap: 8,
+  searchbar: {
+    marginHorizontal: 16,
+    marginBottom: 8,
+    backgroundColor: '#1E293B',
+    borderRadius: 8,
   },
-  weekCard: {
-    padding: 12,
-    paddingHorizontal: 16,
-    borderRadius: 12,
-    alignItems: 'center',
-    minWidth: 70,
-  },
-  weekCardSelected: {
-    backgroundColor: '#0D9488',
-  },
-  weekNum: {
-    fontSize: 16,
-    fontWeight: 'bold',
+  searchInput: {
     color: '#F8FAFC',
-  },
-  weekLabel: {
-    fontSize: 11,
-    color: '#94A3B8',
-    marginTop: 2,
-  },
-  weekTextSelected: {
-    color: '#fff',
   },
   filterRow: {
     flexDirection: 'row',
     paddingHorizontal: 16,
-    marginBottom: 8,
+    paddingBottom: 8,
     gap: 8,
   },
-  chip: {
+  filterChip: {
     backgroundColor: '#1E293B',
   },
-  chipSelected: {
+  filterChipSelected: {
     backgroundColor: '#0D9488',
   },
-  list: {
+  listContent: {
     padding: 16,
-    paddingTop: 8,
-  },
-  postCard: {
-    marginBottom: 12,
-  },
-  statusContainer: {
-    marginRight: 8,
-  },
-  statusChip: {
-    height: 24,
-  },
-  statusChipText: {
-    color: '#fff',
-    fontSize: 11,
-  },
-  contentPreview: {
-    lineHeight: 22,
-    marginBottom: 12,
-  },
-  postMeta: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  typeChip: {
-    backgroundColor: '#1E293B',
-    height: 24,
-  },
-  platformChip: {
-    backgroundColor: '#0A66C2',
-    height: 24,
-  },
-  engagementRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginTop: 12,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#1E293B',
-  },
-  engagementText: {
-    color: '#10B981',
-    fontSize: 13,
-  },
-  cardActions: {
-    justifyContent: 'flex-start',
-  },
-  engagedButton: {
-    backgroundColor: '#10B981',
-  },
-  publishButton: {
-    backgroundColor: '#0D9488',
-  },
-  scheduledHint: {
-    color: '#94A3B8',
-    fontSize: 13,
-    paddingHorizontal: 8,
-  },
-  sectionHeader: {
-    color: '#94A3B8',
-    fontSize: 14,
-    fontWeight: '600',
-    paddingVertical: 12,
-    backgroundColor: '#0F172A',
+    paddingBottom: 100,
   },
   emptyState: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 40,
+    paddingVertical: 60,
   },
   emptyTitle: {
+    fontSize: 18,
+    fontWeight: '600',
     color: '#F8FAFC',
     marginTop: 16,
-    marginBottom: 8,
   },
   emptyText: {
+    fontSize: 14,
     color: '#94A3B8',
     textAlign: 'center',
+    marginTop: 8,
+    paddingHorizontal: 32,
+  },
+  fab: {
+    position: 'absolute',
+    right: 16,
+    bottom: 16,
+    backgroundColor: '#0D9488',
   },
 });

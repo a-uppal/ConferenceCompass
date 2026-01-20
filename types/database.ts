@@ -40,6 +40,31 @@ export interface Conference {
   updated_at: string;
 }
 
+export type ConfidenceLevel = 'high' | 'medium' | 'low' | 'not_found';
+
+export interface OCRFieldResult {
+  value: string | null;
+  confidence: ConfidenceLevel;
+}
+
+export interface OCRExtractionData {
+  firstName: OCRFieldResult;
+  lastName: OCRFieldResult;
+  company: OCRFieldResult;
+  title: OCRFieldResult;
+  email: OCRFieldResult;
+  phone: OCRFieldResult;
+  rawText: string;
+}
+
+// Follow-up related types
+export type FollowUpChannel = 'linkedin' | 'email' | 'phone' | 'other';
+export type FollowUpResponseStatus = 'pending' | 'replied' | 'no_response' | 'meeting_booked';
+export type MessageStyle = 'professional' | 'casual' | 'brief';
+export type ReminderType = 'initial' | 'follow_up' | 'check_in';
+export type ReminderStatus = 'pending' | 'sent' | 'dismissed';
+export type ResponseType = 'positive' | 'neutral' | 'negative' | 'meeting_scheduled';
+
 export interface Contact {
   id: string;
   conference_id: string;
@@ -55,8 +80,50 @@ export interface Contact {
   notes?: string;
   follow_up_status: 'none' | 'pending' | 'completed';
   follow_up_date?: string;
+  // Enhanced follow-up fields
+  follow_up_channel?: FollowUpChannel;
+  follow_up_message?: string;
+  follow_up_sent_at?: string;
+  follow_up_response_status?: FollowUpResponseStatus;
+  priority_score?: number;
+  // OCR metadata fields
+  ocr_extraction_data?: OCRExtractionData;
+  ocr_confidence_score?: number;
+  capture_method?: 'manual' | 'badge_scan' | 'import';
   created_at: string;
   updated_at: string;
+}
+
+export interface FollowUpReminder {
+  id: string;
+  contact_id: string;
+  user_id: string;
+  remind_at: string;
+  reminder_type: ReminderType;
+  status: ReminderStatus;
+  notification_id?: string;
+  created_at: string;
+  updated_at: string;
+  // Joined data
+  contact?: Contact;
+}
+
+export interface FollowUpHistory {
+  id: string;
+  contact_id: string;
+  user_id: string;
+  channel: FollowUpChannel;
+  message_style?: MessageStyle;
+  message_content?: string;
+  ai_generated: boolean;
+  sent_at: string;
+  response_received: boolean;
+  response_at?: string;
+  response_type?: ResponseType;
+  notes?: string;
+  created_at: string;
+  // Joined data
+  contact?: Contact;
 }
 
 export interface Session {
@@ -66,6 +133,10 @@ export interface Session {
   description?: string;
   speaker_name?: string;
   speaker_company?: string;
+  speaker_role?: string;
+  relevance?: string;
+  demo_focus?: string;
+  partnership_opportunity?: string;
   location?: string;
   start_time: string;
   end_time: string;
@@ -219,6 +290,16 @@ export interface Database {
         Row: DailyCheckIn;
         Insert: Omit<DailyCheckIn, 'id' | 'created_at'>;
         Update: Partial<Omit<DailyCheckIn, 'id'>>;
+      };
+      follow_up_reminders: {
+        Row: FollowUpReminder;
+        Insert: Omit<FollowUpReminder, 'id' | 'created_at' | 'updated_at' | 'contact'>;
+        Update: Partial<Omit<FollowUpReminder, 'id' | 'contact'>>;
+      };
+      follow_up_history: {
+        Row: FollowUpHistory;
+        Insert: Omit<FollowUpHistory, 'id' | 'created_at' | 'contact'>;
+        Update: Partial<Omit<FollowUpHistory, 'id' | 'contact'>>;
       };
     };
   };

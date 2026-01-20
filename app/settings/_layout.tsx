@@ -12,6 +12,14 @@ export default function SettingsLayout() {
         name="report"
         options={{ title: 'Trip Report' }}
       />
+      <Stack.Screen
+        name="conferences"
+        options={{ title: 'Manage Conferences' }}
+      />
+      <Stack.Screen
+        name="conference-form"
+        options={{ title: 'Conference' }}
+      />
     </Stack>
   );
 }

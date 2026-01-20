@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { View, StyleSheet, ScrollView, Alert } from 'react-native';
+import { View, StyleSheet, ScrollView, Alert, Image, TouchableOpacity, Modal, Dimensions } from 'react-native';
 import { Text, Surface, Button, Chip, Divider, TextInput, Card, IconButton, FAB } from 'react-native-paper';
 import { useLocalSearchParams, router } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -10,6 +10,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useSessionStore } from '@/stores/sessionStore';
 import { supabase } from '@/services/supabase';
 import { Session, TalkingPoint, SessionCapture } from '@/types/database';
+import { isSessionLive, parseTimestamp } from '@/utils/dateUtils';
 
 export default function SessionDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -26,6 +27,7 @@ export default function SessionDetailScreen() {
   const [isRecording, setIsRecording] = useState(false);
   const [recording, setRecording] = useState<Audio.Recording | null>(null);
   const [fabOpen, setFabOpen] = useState(false);
+  const [selectedPhoto, setSelectedPhoto] = useState<string | null>(null);
 
   useEffect(() => {
     loadSession();
@@ -193,9 +195,9 @@ export default function SessionDetailScreen() {
     );
   }
 
-  const startTime = new Date(session.start_time);
-  const endTime = new Date(session.end_time);
-  const isNow = new Date() >= startTime && new Date() <= endTime;
+  const startTime = parseTimestamp(session.start_time);
+  const endTime = parseTimestamp(session.end_time);
+  const isNow = isSessionLive(session.start_time, session.end_time);
 
   return (
     <View style={styles.container}>
@@ -227,12 +229,17 @@ export default function SessionDetailScreen() {
           )}
 
           {session.speaker_name && (
-            <View style={styles.metaRow}>
-              <MaterialCommunityIcons name="account-outline" size={16} color="#94A3B8" />
-              <Text style={styles.metaText}>
-                {session.speaker_name}
-                {session.speaker_company && ` • ${session.speaker_company}`}
-              </Text>
+            <View style={styles.speakerSection}>
+              <View style={styles.metaRow}>
+                <MaterialCommunityIcons name="account-outline" size={16} color="#94A3B8" />
+                <Text style={styles.metaText}>
+                  {session.speaker_name}
+                  {session.speaker_company && ` • ${session.speaker_company}`}
+                </Text>
+              </View>
+              {session.speaker_role && (
+                <Text style={styles.speakerRole}>{session.speaker_role}</Text>
+              )}
             </View>
           )}
 
@@ -278,6 +285,17 @@ export default function SessionDetailScreen() {
           </View>
         </Surface>
 
+        {/* Relevance to Compass */}
+        {session.relevance && (
+          <Surface style={[styles.section, styles.relevanceSection]}>
+            <Text variant="titleMedium" style={styles.sectionTitle}>
+              🎯 Why This Speaker Matters
+            </Text>
+            <Divider style={styles.divider} />
+            <Text style={styles.relevanceText}>{session.relevance}</Text>
+          </Surface>
+        )}
+
         {/* Talking Points */}
         {session.talking_points && session.talking_points.length > 0 && (
           <Surface style={styles.section}>
@@ -300,6 +318,28 @@ export default function SessionDetailScreen() {
                   </View>
                 </View>
               ))}
+          </Surface>
+        )}
+
+        {/* Demo Focus */}
+        {session.demo_focus && (
+          <Surface style={styles.section}>
+            <Text variant="titleMedium" style={styles.sectionTitle}>
+              🖥️ Demo Focus
+            </Text>
+            <Divider style={styles.divider} />
+            <Text style={styles.demoFocusText}>{session.demo_focus}</Text>
+          </Surface>
+        )}
+
+        {/* Partnership Opportunity */}
+        {session.partnership_opportunity && (
+          <Surface style={[styles.section, styles.partnershipSection]}>
+            <Text variant="titleMedium" style={styles.sectionTitle}>
+              🤝 Partnership Opportunity
+            </Text>
+            <Divider style={styles.divider} />
+            <Text style={styles.partnershipText}>{session.partnership_opportunity}</Text>
           </Surface>
         )}
 
@@ -354,37 +394,91 @@ export default function SessionDetailScreen() {
           )}
         </Surface>
 
-        {/* Captures */}
-        {session.captures && session.captures.length > 0 && (
+        {/* Slide Photos */}
+        {session.captures && session.captures.filter(c => c.capture_type === 'photo').length > 0 && (
           <Surface style={styles.section}>
             <Text variant="titleMedium" style={styles.sectionTitle}>
-              📎 Your Captures
+              📷 Slide Photos
             </Text>
             <Divider style={styles.divider} />
-            {session.captures.map((capture) => (
-              <Card key={capture.id} style={styles.captureCard}>
-                <Card.Title
-                  title={
-                    capture.capture_type === 'photo'
-                      ? '📷 Photo'
-                      : capture.capture_type === 'voice_note'
-                      ? '🎙️ Voice Note'
-                      : '📝 Note'
-                  }
-                  subtitle={new Date(capture.created_at).toLocaleString()}
-                />
-                {capture.text_content && (
-                  <Card.Content>
-                    <Text>{capture.text_content}</Text>
-                  </Card.Content>
-                )}
-              </Card>
-            ))}
+            <View style={styles.photoGrid}>
+              {session.captures
+                .filter(c => c.capture_type === 'photo' && c.content_url)
+                .map((capture) => (
+                  <TouchableOpacity
+                    key={capture.id}
+                    style={styles.photoThumbnail}
+                    onPress={() => setSelectedPhoto(capture.content_url!)}
+                  >
+                    <Image
+                      source={{ uri: capture.content_url }}
+                      style={styles.thumbnailImage}
+                      resizeMode="cover"
+                    />
+                    <Text style={styles.photoTime}>
+                      {new Date(capture.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+            </View>
+          </Surface>
+        )}
+
+        {/* Other Captures (Voice Notes & Text Notes) */}
+        {session.captures && session.captures.filter(c => c.capture_type !== 'photo').length > 0 && (
+          <Surface style={styles.section}>
+            <Text variant="titleMedium" style={styles.sectionTitle}>
+              📎 Notes & Recordings
+            </Text>
+            <Divider style={styles.divider} />
+            {session.captures
+              .filter(c => c.capture_type !== 'photo')
+              .map((capture) => (
+                <Card key={capture.id} style={styles.captureCard}>
+                  <Card.Title
+                    title={
+                      capture.capture_type === 'voice_note'
+                        ? '🎙️ Voice Note'
+                        : '📝 Note'
+                    }
+                    subtitle={new Date(capture.created_at).toLocaleString()}
+                  />
+                  {capture.text_content && (
+                    <Card.Content>
+                      <Text>{capture.text_content}</Text>
+                    </Card.Content>
+                  )}
+                </Card>
+              ))}
           </Surface>
         )}
 
         <View style={styles.bottomPadding} />
       </ScrollView>
+
+      {/* Photo Viewer Modal */}
+      <Modal
+        visible={!!selectedPhoto}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setSelectedPhoto(null)}
+      >
+        <View style={styles.modalContainer}>
+          <TouchableOpacity
+            style={styles.modalClose}
+            onPress={() => setSelectedPhoto(null)}
+          >
+            <MaterialCommunityIcons name="close" size={28} color="#F8FAFC" />
+          </TouchableOpacity>
+          {selectedPhoto && (
+            <Image
+              source={{ uri: selectedPhoto }}
+              style={styles.fullImage}
+              resizeMode="contain"
+            />
+          )}
+        </View>
+      </Modal>
 
       {/* Recording Indicator */}
       {isRecording && (
@@ -468,10 +562,42 @@ const styles = StyleSheet.create({
     marginTop: 8,
     backgroundColor: '#1E293B',
   },
+  speakerSection: {
+    marginTop: 4,
+  },
+  speakerRole: {
+    color: '#64748B',
+    fontSize: 13,
+    marginLeft: 24,
+    marginTop: 2,
+    fontStyle: 'italic',
+  },
   section: {
     padding: 16,
     borderRadius: 12,
     marginBottom: 12,
+  },
+  relevanceSection: {
+    borderLeftWidth: 4,
+    borderLeftColor: '#0D9488',
+  },
+  relevanceText: {
+    lineHeight: 22,
+    color: '#F8FAFC',
+  },
+  demoFocusText: {
+    lineHeight: 22,
+    color: '#94A3B8',
+    fontStyle: 'italic',
+  },
+  partnershipSection: {
+    borderLeftWidth: 4,
+    borderLeftColor: '#F59E0B',
+    backgroundColor: '#1E293B',
+  },
+  partnershipText: {
+    lineHeight: 22,
+    color: '#FCD34D',
   },
   sectionHeader: {
     flexDirection: 'row',
@@ -536,6 +662,52 @@ const styles = StyleSheet.create({
   },
   captureCard: {
     marginBottom: 8,
+  },
+  photoGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  photoThumbnail: {
+    width: (Dimensions.get('window').width - 64) / 3,
+    aspectRatio: 1,
+    borderRadius: 8,
+    overflow: 'hidden',
+    backgroundColor: '#1E293B',
+  },
+  thumbnailImage: {
+    width: '100%',
+    height: '100%',
+  },
+  photoTime: {
+    position: 'absolute',
+    bottom: 4,
+    left: 4,
+    right: 4,
+    fontSize: 10,
+    color: '#F8FAFC',
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+    borderRadius: 4,
+    textAlign: 'center',
+  },
+  modalContainer: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.95)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalClose: {
+    position: 'absolute',
+    top: 50,
+    right: 20,
+    zIndex: 10,
+    padding: 8,
+  },
+  fullImage: {
+    width: Dimensions.get('window').width,
+    height: Dimensions.get('window').height * 0.8,
   },
   recordingIndicator: {
     position: 'absolute',
